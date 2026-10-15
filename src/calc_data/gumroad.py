@@ -95,6 +95,21 @@ def _normalize_products(payload: Any) -> list[dict[str, Any]]:
     return []
 
 
+def normalize_products(products: list[dict[str, Any]]) -> list[dict[str, str]]:
+    """Normalize a list of product dicts to only include ``name`` and ``id``.
+
+    Args:
+        products: Full product list from the Gumroad API.
+
+    Returns:
+        A list of dicts with ``name`` and ``id`` keys.
+    """
+    return [
+        {"name": str(p.get("name", "")), "id": str(p.get("id", ""))}
+        for p in products
+    ]
+
+
 def list_products() -> list[dict[str, Any]]:
     """List all products owned by the authenticated user (raw API data)."""
     response = get("/v2/products")
@@ -118,12 +133,10 @@ def _is_cache_valid(path: Path) -> bool:
         return False
 
 
-def list_products_cached() -> list[dict[str, str]]:
-    """List products, returning only ``name`` and ``id``.
-
-    Results are cached for one hour in the ``cache`` folder under the current
-    directory. If a valid cache file exists it is returned; otherwise the Gumroad
-    API is queried and the cache is refreshed.
+def list_products_cached() -> list[dict[str, Any]]:
+    """List products, with results cached for one hour in the ``cache`` folder
+    under the current directory. If a valid cache file exists it is returned;
+    otherwise the Gumroad API is queried and the cache is refreshed.
     """
     cache_file = _cache_path()
 
@@ -135,17 +148,12 @@ def list_products_cached() -> list[dict[str, str]]:
             pass
 
     products = list_products()
-    result = [
-        {"name": str(p.get("name", "")), "id": str(p.get("id", ""))}
-        for p in products
-    ]
-
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     cache_file.write_text(
-        json.dumps({"fetched_at": time.time(), "products": result}, indent=2)
+        json.dumps({"fetched_at": time.time(), "products": products}, indent=2)
     )
 
-    return result
+    return products
 
 
 def main() -> None:
