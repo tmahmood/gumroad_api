@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import requests
+from dotenv import load_dotenv
 
 GUMROAD_BASE_URL = "https://api.gumroad.com"
 
@@ -35,7 +36,7 @@ def gumroad_request(
     path: str,
     *,
     params: dict[str, Any] | None = None,
-    json: dict[str, Any] | None = None,
+    content: dict[str, Any] | None = None,
     timeout: float = 30.0,
 ) -> requests.Response:
     """Make an authenticated request to the Gumroad API.
@@ -43,7 +44,8 @@ def gumroad_request(
     Args:
         method: HTTP method (e.g. ``"GET"``, ``"POST"``).
         path: API path, e.g. ``"/v2/products"``. Leading slash is optional.
-        json: JSON body to send with the request.
+        content: JSON body to send with the request.
+        params: Query parameters to send with the request.
         timeout: Request timeout in seconds.
 
     Returns:
@@ -66,7 +68,7 @@ def gumroad_request(
         url=url,
         headers=headers,
         params=params,
-        json=json,
+        json=content,
         timeout=timeout,
     )
     response.raise_for_status()
@@ -78,9 +80,9 @@ def get(path: str, **kwargs: Any) -> requests.Response:
     return gumroad_request("GET", path, **kwargs)
 
 
-def post(path: str, *, json: dict[str, Any] | None = None, **kwargs: Any) -> requests.Response:
+def post(path: str, *, content: dict[str, Any] | None = None, **kwargs: Any) -> requests.Response:
     """Convenience wrapper for POST requests."""
-    return gumroad_request("POST", path, json=json, **kwargs)
+    return gumroad_request("POST", path, content=content, **kwargs)
 
 
 def _normalize_products(payload: Any) -> list[dict[str, Any]]:
@@ -158,8 +160,10 @@ def list_products_cached() -> list[dict[str, Any]]:
 
 def main() -> None:
     """Demo: list products (name + id) using the env-provided access token."""
+    load_dotenv()
     try:
         products = list_products_cached()
+        normalized_ = normalize_products(products)
         print(f"Fetched {len(products)} product(s) from Gumroad")
         for product in products:
             print(f"- {product['name']} ({product['id']})")
