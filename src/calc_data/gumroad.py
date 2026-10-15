@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,22 @@ GUMROAD_BASE_URL = "https://api.gumroad.com"
 
 CACHE_DIR = Path("cache")
 CACHE_TTL = 3600  # 1 hour in seconds
+
+
+@dataclass
+class Product:
+    """Represents a Gumroad product with name and id."""
+    name: str
+    id: str
+
+    def to_dict(self) -> dict[str, str]:
+        """Convert Product to a dict for JSON serialization."""
+        return {"name": self.name, "id": self.id}
+
+
+def _product_from_dict(d: dict[str, str]) -> Product:
+    """ reconstruct Product from a dict."""
+    return Product(name=d["name"], id=d["id"])
 
 
 def _get_access_token() -> str:
@@ -85,34 +102,19 @@ def post(path: str, *, content: dict[str, Any] | None = None, **kwargs: Any) -> 
     return gumroad_request("POST", path, content=content, **kwargs)
 
 
-def _normalize_products(payload: Any) -> list[dict[str, Any]]:
-    """Extract a list of product dicts from a Gumroad API response."""
+def _normalize_products(payload: Any) -> list[Product]:
+    """Extract a list of Product dicts from a Gumroad API response."""
     if isinstance(payload, dict):
         for key in ("products", "data", "results"):
             if isinstance(payload.get(key), list):
-                return payload[key]
+                return [Product(name=str(p.get("name", "")), id=str(p.get("id", ""))) for p in payload[key]]
         return []
     if isinstance(payload, list):
-        return payload
+        return [Product(name=str(p.get("name", "")), id=str(p.get("id", ""))) for p in payload]
     return []
 
 
-def normalize_products(products: list[dict[str, Any]]) -> list[dict[str, str]]:
-    """Normalize a list of product dicts to only include ``name`` and ``id``.
-
-    Args:
-        products: Full product list from the Gumroad API.
-
-    Returns:
-        A list of dicts with ``name`` and ``id`` keys.
-    """
-    return [
-        {"name": str(p.get("name", "")), "id": str(p.get("id", ""))}
-        for p in products
-    ]
-
-
-def list_products() -> list[dict[str, Any]]:
+def list_products() -> list[Product]:
     """List all products owned by the authenticated user (raw API data)."""
     response = get("/v2/products")
     return _normalize_products(response.json())
@@ -135,7 +137,7 @@ def _is_cache_valid(path: Path) -> bool:
         return False
 
 
-def list_products_cached() -> list[dict[str, Any]]:
+def list_products_cached() -> list[Product]:
     """List products, with results cached for one hour in the ``cache`` folder
     under the current directory. If a valid cache file exists it is returned;
     otherwise the Gumroad API is queried and the cache is refreshed.
@@ -145,12 +147,17 @@ def list_products_cached() -> list[dict[str, Any]]:
     if _is_cache_valid(cache_file):
         try:
             data = json.loads(cache_file.read_text())
-            return data.get("products", [])
+            return [_product_from_dict(p) for p in data.get("products", [])]
         except (json.JSONDecodeError, OSError):
             pass
 
     products = list_products()
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_file.write_text(
+        json.dumps({"fetched_at": time.time(), "products": [p.to_dict() for p in products]}, indent=2)
+    )
+
+    return products
     cache_file.write_text(
         json.dumps({"fetched_at": time.time(), "products": products}, indent=2)
     )
@@ -163,10 +170,9 @@ def main() -> None:
     load_dotenv()
     try:
         products = list_products_cached()
-        normalized_ = normalize_products(products)
         print(f"Fetched {len(products)} product(s) from Gumroad")
         for product in products:
-            print(f"- {product['name']} ({product['id']})")
+            print(f"- {product.name} ({product.id})")
     except RuntimeError as exc:
         print(f"Configuration error: {exc}")
     except requests.HTTPError as exc:
