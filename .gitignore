@@ -5,6 +5,7 @@ build/
 dist/
 wheels/
 *.egg-info
+src/calc_data/cache
 
 # Virtual environments
 .venv

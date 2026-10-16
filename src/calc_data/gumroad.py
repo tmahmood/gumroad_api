@@ -6,46 +6,30 @@ Connects to https://api.gumroad.com using an access token provided via the
 
 from __future__ import annotations
 
+import functools
 import json
 import os
-import time
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
+
+from calc_data.products_dataclass import GumroadProduct
 
 import requests
 from dotenv import load_dotenv
 
+from calc_data.utilities import _is_cache_valid, _write_debug, CACHE_DIR
+
 GUMROAD_BASE_URL = "https://api.gumroad.com"
-
-CACHE_DIR = Path("cache")
-CACHE_TTL = 3600  # 1 hour in seconds
-
-
-@dataclass
-class Product:
-    """Represents a Gumroad product with name and id."""
-    name: str
-    id: str
-
-    def to_dict(self) -> dict[str, str]:
-        """Convert Product to a dict for JSON serialization."""
-        return {"name": self.name, "id": self.id}
-
-
-def _product_from_dict(d: dict[str, str]) -> Product:
-    """ reconstruct Product from a dict."""
-    return Product(name=d["name"], id=d["id"])
+CACHE_VERSION = "v1"
 
 
 def _get_access_token() -> str:
     """Return the Gumroad access token from the environment."""
-    token = os.environ.get("GUMROAD_ACCESS_TOKEN")
-    if not token:
+    access_token = os.environ.get("GUMROAD_ACCESS_TOKEN")
+    if not access_token:
         raise RuntimeError(
             "GUMROAD_ACCESS_TOKEN environment variable is not set"
         )
-    return token
+    return access_token
 
 
 def gumroad_request(
@@ -72,18 +56,18 @@ def gumroad_request(
         RuntimeError: If ``GUMROAD_ACCESS_TOKEN`` is not set.
         requests.HTTPError: If the API returns a non-2xx status.
     """
-    token = _get_access_token()
-    url = path if path.startswith("http") else GUMROAD_BASE_URL + path
+    access_token = _get_access_token()
+    request_url = path if path.startswith("http") else GUMROAD_BASE_URL + path
 
-    headers = {
-        "Authorization": f"Bearer {token}",
+    request_headers = {
+        "Authorization": f"Bearer {access_token}",
         "Accept": "application/json",
     }
 
     response = requests.request(
         method=method,
-        url=url,
-        headers=headers,
+        url=request_url,
+        headers=request_headers,
         params=params,
         json=content,
         timeout=timeout,
@@ -92,91 +76,97 @@ def gumroad_request(
     return response
 
 
-def get(path: str, **kwargs: Any) -> requests.Response:
+def _store_response(decorated_function):
+    """Decorator that stores the API response in a versioned JSON file."""
+    @functools.wraps(decorated_function)
+    def wrapper(endpoint_path: str, **request_keyword_arguments: Any) -> requests.Response:
+        sanitized_endpoint_path = endpoint_path.lstrip("/").replace("/", "_")
+        version_suffix = (
+            str(CACHE_VERSION)
+            if str(CACHE_VERSION).startswith("v")
+            else f"v{CACHE_VERSION}"
+        )
+        cache_file_path = CACHE_DIR / f"gumroad_{sanitized_endpoint_path}_{version_suffix}.json"
+
+        if _is_cache_valid(cache_file_path):
+            try:
+                cached_payload = json.loads(cache_file_path.read_text())
+                cached_response_payload = cached_payload.get("response")
+                if cached_response_payload is not None:
+                    cached_response = requests.Response()
+                    cached_response.status_code = 200
+                    cached_response._content = json.dumps(cached_response_payload).encode("utf-8")
+                    return cached_response
+            except (OSError, json.JSONDecodeError, AttributeError):
+                pass
+
+        response = decorated_function(endpoint_path, **request_keyword_arguments)
+        try:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            cache_payload = {
+                "version": str(CACHE_VERSION),
+                "cache_version": str(CACHE_VERSION),
+                "response": response.json(),
+            }
+            cache_file_path.write_text(json.dumps(cache_payload, indent=2))
+        except (OSError, json.JSONDecodeError):
+            pass
+        return response
+    return wrapper
+
+
+@_store_response
+def get(path: str, **request_keyword_arguments: Any) -> requests.Response:
     """Convenience wrapper for GET requests."""
-    return gumroad_request("GET", path, **kwargs)
+    return gumroad_request("GET", path, **request_keyword_arguments)
 
 
-def post(path: str, *, content: dict[str, Any] | None = None, **kwargs: Any) -> requests.Response:
+def post(path: str, *, content: dict[str, Any] | None = None, **request_keyword_arguments: Any) -> requests.Response:
     """Convenience wrapper for POST requests."""
-    return gumroad_request("POST", path, content=content, **kwargs)
+    return gumroad_request("POST", path, content=content, **request_keyword_arguments)
 
 
-def _normalize_products(payload: Any) -> list[Product]:
-    """Extract a list of Product dicts from a Gumroad API response."""
+def _normalize_products(payload: Any) -> list[GumroadProduct]:
+    """Extract a list of GumroadProduct dicts from a Gumroad API response."""
     if isinstance(payload, dict):
-        for key in ("products", "data", "results"):
-            if isinstance(payload.get(key), list):
-                return [Product(name=str(p.get("name", "")), id=str(p.get("id", ""))) for p in payload[key]]
+        for response_key in ("products", "data", "results"):
+            products_list = payload.get(response_key)
+            if isinstance(products_list, list):
+                return [GumroadProduct(**product_data) for product_data in products_list]
         return []
     if isinstance(payload, list):
-        return [Product(name=str(p.get("name", "")), id=str(p.get("id", ""))) for p in payload]
+        return [GumroadProduct(**product_data) for product_data in payload]
     return []
 
 
-def list_products() -> list[Product]:
+def list_products() -> tuple[list[GumroadProduct], dict[str, Any]]:
     """List all products owned by the authenticated user (raw API data)."""
     response = get("/v2/products")
-    return _normalize_products(response.json())
-
-
-def _cache_path() -> Path:
-    """Return the path to the products cache file."""
-    return CACHE_DIR / "gumroad_products.json"
-
-
-def _is_cache_valid(path: Path) -> bool:
-    """Return True if the cache file exists and is younger than CACHE_TTL."""
-    if not path.exists():
-        return False
     try:
-        data = json.loads(path.read_text())
-        fetched_at = data.get("fetched_at", 0)
-        return (time.time() - fetched_at) < CACHE_TTL
-    except (json.JSONDecodeError, OSError):
-        return False
-
-
-def list_products_cached() -> list[Product]:
-    """List products, with results cached for one hour in the ``cache`` folder
-    under the current directory. If a valid cache file exists it is returned;
-    otherwise the Gumroad API is queried and the cache is refreshed.
-    """
-    cache_file = _cache_path()
-
-    if _is_cache_valid(cache_file):
+        raw_response_data = response.json()
+    except json.JSONDecodeError:
+        # Store failed raw JSON to debug file
         try:
-            data = json.loads(cache_file.read_text())
-            return [_product_from_dict(p) for p in data.get("products", [])]
-        except (json.JSONDecodeError, OSError):
+            _write_debug(response.text)
+        except OSError:
             pass
-
-    products = list_products()
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
-    cache_file.write_text(
-        json.dumps({"fetched_at": time.time(), "products": [p.to_dict() for p in products]}, indent=2)
-    )
-
-    return products
-    cache_file.write_text(
-        json.dumps({"fetched_at": time.time(), "products": products}, indent=2)
-    )
-
-    return products
+        return [], {}
+    products = _normalize_products(raw_response_data)
+    return products, raw_response_data
 
 
 def main() -> None:
     """Demo: list products (name + id) using the env-provided access token."""
     load_dotenv()
     try:
-        products = list_products_cached()
+        products, raw_response_data = list_products()
         print(f"Fetched {len(products)} product(s) from Gumroad")
         for product in products:
             print(f"- {product.name} ({product.id})")
-    except RuntimeError as exc:
-        print(f"Configuration error: {exc}")
-    except requests.HTTPError as exc:
-        print(f"Gumroad API error: {exc.response.status_code} {exc.response.text}")
+    except RuntimeError as configuration_error:
+        print(f"Configuration error: {configuration_error}")
+    except requests.HTTPError as http_error:
+        print(f"Gumroad API error: {http_error.response.status_code} {http_error.response.text}")
 
 
 if __name__ == "__main__":

@@ -49,7 +49,7 @@ class GumroadProduct:
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dict for JSON serialization, excluding None values."""
-        return {k: v for k, v in self.__dict__.items() if v is not None}
+        return {key: value for key, value in self.__dict__.items() if value is not None}
 
 
 @dataclass
@@ -71,39 +71,39 @@ class GumroadProductsCache:
         """Create a GumroadProductsCache from a dict (typically after JSON load)."""
         products = [
             GumroadProduct(
-                name=p.get("name", ""),
-                id=p.get("id", ""),
-                price=p.get("price", 0),
-                currency=p.get("currency", "usd"),
-                category=p.get("category", "other"),
-                category_label=p.get("category_label", "Other"),
-                description=p.get("description", ""),
-                formatted_price=p.get("formatted_price", ""),
-                preview_url=p.get("preview_url", ""),
-                thumbnail_url=p.get("thumbnail_url"),
-                main_cover_id=p.get("main_cover_id"),
-                url=p.get("url"),
-                tags=p.get("tags", []),
-                custom_summary=p.get("custom_summary"),
-                sales_count=p.get("sales_count", 0),
-                sales_usd_cents=p.get("sales_usd_cents", 0.0),
-                require_shipping=p.get("require_shipping", False),
-                customizable_price=p.get("customizable_price", False),
-                custom_permalink=p.get("custom_permalink"),
-                subscription_duration=p.get("subscription_duration"),
-                custom_receipt=p.get("custom_receipt"),
-                custom_fields=p.get("custom_fields", []),
-                is_tiered_membership=p.get("is_tiered_membership", False),
-                recurrences=p.get("recurrences"),
-                covers=p.get("covers", []),
-                bundle_products=p.get("bundle_products", []),
-                variants=p.get("variants", []),
-                custom_delivery_url=p.get("custom_delivery_url"),
-                deleted=p.get("deleted", False),
-                taxonomy_id=p.get("taxonomy_id", 266),
-                max_purchase_count=p.get("max_purchase_count"),
+                name=product_dict.get("name", ""),
+                id=product_dict.get("id", ""),
+                price=product_dict.get("price", 0),
+                currency=product_dict.get("currency", "usd"),
+                category=product_dict.get("category", "other"),
+                category_label=product_dict.get("category_label", "Other"),
+                description=product_dict.get("description", ""),
+                formatted_price=product_dict.get("formatted_price", ""),
+                preview_url=product_dict.get("preview_url", ""),
+                thumbnail_url=product_dict.get("thumbnail_url"),
+                main_cover_id=product_dict.get("main_cover_id"),
+                url=product_dict.get("url"),
+                tags=product_dict.get("tags", []),
+                custom_summary=product_dict.get("custom_summary"),
+                sales_count=product_dict.get("sales_count", 0),
+                sales_usd_cents=product_dict.get("sales_usd_cents", 0.0),
+                require_shipping=product_dict.get("require_shipping", False),
+                customizable_price=product_dict.get("customizable_price", False),
+                custom_permalink=product_dict.get("custom_permalink"),
+                subscription_duration=product_dict.get("subscription_duration"),
+                custom_receipt=product_dict.get("custom_receipt"),
+                custom_fields=product_dict.get("custom_fields", []),
+                is_tiered_membership=product_dict.get("is_tiered_membership", False),
+                recurrences=product_dict.get("recurrences"),
+                covers=product_dict.get("covers", []),
+                bundle_products=product_dict.get("bundle_products", []),
+                variants=product_dict.get("variants", []),
+                custom_delivery_url=product_dict.get("custom_delivery_url"),
+                deleted=product_dict.get("deleted", False),
+                taxonomy_id=product_dict.get("taxonomy_id", 266),
+                max_purchase_count=product_dict.get("max_purchase_count"),
             )
-            for p in data.get("products", [])
+            for product_dict in data.get("products", [])
         ]
         return cls(fetched_at=data.get("fetched_at", 0), products=products)
 
