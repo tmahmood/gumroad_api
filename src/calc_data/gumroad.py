@@ -418,6 +418,7 @@ def upload_readme_to_dummy_product() -> dict[str, Any]:
 def main() -> None:
     """Demo: list products (name + id) using the env-provided access token."""
     load_dotenv()
+    upload_readme_to_dummy_product()
     try:
         products, _raw_response_data = list_products()
         print(f"Fetched {len(products)} product(s) from Gumroad")
