@@ -658,24 +658,7 @@ def upload_product_files_via_presign(
     """
     uploaded_file_urls_list: list[str] = []
     for file_entry in file_paths:
-        file_name_string: str | None = None
-        file_size_integer: int | None = None
-        if isinstance(file_entry, (str, Path)):
-            target_path_object = Path(file_entry)
-            if not target_path_object.is_file():
-                raise FileNotFoundError(f"File not found: {target_path_object}")
-            file_name_string = target_path_object.name
-            file_size_integer = target_path_object.stat().st_size
-        elif isinstance(file_entry, bytes):
-            file_name_string = "file.bin"
-            file_size_integer = len(file_entry)
-        elif hasattr(file_entry, "name"):
-            file_name_string = Path(str(getattr(file_entry, "name"))).name
-            if hasattr(file_entry, "seek") and hasattr(file_entry, "tell"):
-                current_stream_position = file_entry.tell()
-                file_entry.seek(0, os.SEEK_END)
-                file_size_integer = file_entry.tell() - current_stream_position
-                file_entry.seek(current_stream_position)
+        file_name_string, file_size_integer = find_filename_and_size(file_entry)
 
         presigned_response = request_presigned_file_upload_url(
             filename=file_name_string,
@@ -700,6 +683,28 @@ def upload_product_files_via_presign(
         timeout=timeout,
         **request_keyword_arguments,
     )
+
+
+def find_filename_and_size(file_entry: str | Path | BinaryIO | bytes) -> tuple[str | None, int | None]:
+    file_name_string: str | None = None
+    file_size_integer: int | None = None
+    if isinstance(file_entry, (str, Path)):
+        target_path_object = Path(file_entry)
+        if not target_path_object.is_file():
+            raise FileNotFoundError(f"File not found: {target_path_object}")
+        file_name_string = target_path_object.name
+        file_size_integer = target_path_object.stat().st_size
+    elif isinstance(file_entry, bytes):
+        file_name_string = "file.bin"
+        file_size_integer = len(file_entry)
+    elif hasattr(file_entry, "name"):
+        file_name_string = Path(str(getattr(file_entry, "name"))).name
+        if hasattr(file_entry, "seek") and hasattr(file_entry, "tell"):
+            current_stream_position = file_entry.tell()
+            file_entry.seek(0, os.SEEK_END)
+            file_size_integer = file_entry.tell() - current_stream_position
+            file_entry.seek(current_stream_position)
+    return file_name_string, file_size_integer
 
 
 def _normalize_products(payload: Any) -> list[GumroadProduct]:
@@ -739,14 +744,6 @@ def main() -> None:
         print(f"Fetched {len(products)} product(s) from Gumroad")
         for product in products:
             print(f"- {product.name} ({product.id})")
-        print("uploading file ...")
-        print(upload_product_file_list(
-            DUMMY_PRODUCT,
-            [
-                "../../README.md",
-                "../../AGENTS.md"
-            ]
-        ))
     except RuntimeError as configuration_error:
         print(f"Configuration error: {configuration_error}")
     except requests.HTTPError as http_error:
@@ -754,6 +751,4 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    load_dotenv()
-    print(request_presigned_file_upload_url("README.md"))
-    # main()
+    main()

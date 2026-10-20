@@ -1,3 +1,4 @@
+Make all changes in a new branch, don't merge to main. Go back to main after finishing changes
 Do not write single letter variables.
 Do not write generic function names, write descriptive function names.
 Do not write generic variable names, write descriptive variable names.
