@@ -9,6 +9,7 @@ downloads the product data, the response from the API endpoint is cached and reu
 
 The following providers / agents and models are used, through IntelliJ IDEA, the initial project is generated 
 through OpenCode:
+- OpenCode Deepseek V4.1 Flash     
 - OpenCode nemotron-3.5-lightning
 - Junie Gemini 3.7 Flash
 - llama.cpp Qwen2.5 Code
