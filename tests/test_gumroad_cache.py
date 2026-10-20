@@ -9,6 +9,12 @@ import requests
 
 from calc_data import gumroad
 from calc_data.gumroad import _store_response
+from calc_data.products_dataclass import (
+    GumroadProduct,
+    GumroadProductsCache,
+    products_from_cache,
+    products_to_cache,
+)
 from calc_data.utilities import _is_cache_valid
 
 
@@ -249,3 +255,76 @@ def test_is_cache_valid_checks_file_modification_time(tmp_path: Path) -> None:
     expired_timestamp = time.time() - 3601
     os.utime(test_cache_file, (expired_timestamp, expired_timestamp))
     assert not _is_cache_valid(test_cache_file)
+
+
+def test_gumroad_product_dataclass_handles_latest_cached_json_fields() -> None:
+    sample_product_payload = {
+        "name": "NiFt, Simple, Minimalistic, Frictionless Note App",
+        "description": "<h1>NiFt [Note It FasT]</h1>",
+        "require_shipping": False,
+        "preview_url": "https://public-files.gumroad.com/dzjbgjm3otclanv4an3z8tdi2grr",
+        "custom_receipt": None,
+        "customizable_price": False,
+        "custom_permalink": "nift",
+        "subscription_duration": None,
+        "id": "phRR3J4IO3lBh25O2IV_dQ==",
+        "url": None,
+        "price": 500,
+        "currency": "usd",
+        "taxonomy_id": 266,
+        "category": "other",
+        "category_label": "Other",
+        "short_url": "https://tmahmood.gumroad.com/l/nift",
+        "landing_url": "https://tmahmood.gumroad.com/l/nift",
+        "thumbnail_url": None,
+        "tags": ["productivity", "software"],
+        "formatted_price": "$5",
+        "published": True,
+        "file_info": {},
+        "max_purchase_count": None,
+        "deleted": False,
+        "custom_fields": [],
+        "custom_summary": "NiFt note app",
+        "is_tiered_membership": False,
+        "recurrences": None,
+        "covers": [{"id": "cover_1", "url": "https://example.com/cover.png"}],
+        "main_cover_id": "c362d0f399e8c5700ca9b1809ffdc372",
+        "bundle_products": [],
+        "variants": [],
+        "custom_delivery_url": None,
+        "sales_count": 0,
+        "sales_usd_cents": 0.0,
+    }
+
+    product_instance = GumroadProduct(**sample_product_payload)
+    assert product_instance.name == "NiFt, Simple, Minimalistic, Frictionless Note App"
+    assert product_instance.landing_url == "https://tmahmood.gumroad.com/l/nift"
+    assert product_instance.published is True
+    assert product_instance.file_info == {}
+    assert product_instance.short_url == "https://tmahmood.gumroad.com/l/nift"
+
+    cache_payload = {
+        "version": "v1",
+        "cache_version": "v1",
+        "response": {"success": True, "products": [sample_product_payload]},
+    }
+    parsed_cache_container = GumroadProductsCache.from_dict(cache_payload)
+    assert len(parsed_cache_container.products) == 1
+    assert parsed_cache_container.products[0].landing_url == "https://tmahmood.gumroad.com/l/nift"
+
+    parsed_products = products_from_cache(cache_payload)
+    assert len(parsed_products) == 1
+    assert parsed_products[0].landing_url == "https://tmahmood.gumroad.com/l/nift"
+    assert parsed_products[0].published is True
+    assert parsed_products[0].file_info == {}
+
+    serialized_dictionary = product_instance.to_dict()
+    assert serialized_dictionary["landing_url"] == "https://tmahmood.gumroad.com/l/nift"
+    assert serialized_dictionary["published"] is True
+    assert serialized_dictionary["file_info"] == {}
+    assert "url" not in serialized_dictionary
+
+    serialized_cache = products_to_cache([product_instance], fetched_at=1234567890.0)
+    assert serialized_cache["fetched_at"] == 1234567890.0
+    assert len(serialized_cache["products"]) == 1
+    assert serialized_cache["products"][0]["landing_url"] == "https://tmahmood.gumroad.com/l/nift"
