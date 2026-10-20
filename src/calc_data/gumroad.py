@@ -16,17 +16,25 @@ import requests
 from dotenv import load_dotenv
 
 from calc_data.products_dataclass import GumroadProduct
+from calc_data.s3_upload import upload_presigned_file
 from calc_data.upload_dataclass import (
     PresignedFileUpload,
     PresignedUploadPart,
     UploadedFilePart,
 )
-from calc_data.utilities import CACHE_DIR, FileSummary, _is_cache_valid, _write_debug
+from calc_data.utilities import (
+    CACHE_DIR,
+    FileSummary,
+    _is_cache_valid,
+    _write_debug,
+    collect_file_sizes,
+)
 
 GUMROAD_BASE_URL = "https://api.gumroad.com"
 PRESIGN_ENDPOINT_PATH = "/v2/files/presign"
 COMPLETE_ENDPOINT_PATH = "/v2/files/complete"
 CACHE_VERSION = "v1"
+DUMMY_PRODUCT = "ZiQxH2j2thl6z0P3qti1HQ=="
 
 
 def _get_access_token() -> str:
@@ -131,6 +139,11 @@ def get(path: str, **request_keyword_arguments: Any) -> requests.Response:
 def post(path: str, *, content: dict[str, Any] | None = None, **request_keyword_arguments: Any) -> requests.Response:
     """Convenience wrapper for POST requests."""
     return gumroad_request("POST", path, content=content, **request_keyword_arguments)
+
+
+def put(path: str, *, content: dict[str, Any] | None = None, **request_keyword_arguments: Any) -> requests.Response:
+    """Convenience wrapper for PUT requests."""
+    return gumroad_request("PUT", path, content=content, **request_keyword_arguments)
 
 
 def _normalize_products(payload: Any) -> list[GumroadProduct]:
@@ -348,6 +361,58 @@ def complete_file_uploads(
             presigned_uploads, uploaded_parts_by_file
         )
     ]
+
+
+def attach_file_url_to_product(product_id: str, file_url: str) -> dict[str, Any]:
+    """Attach an uploaded file URL to a Gumroad product.
+
+    Note:
+        Gumroad treats ``files`` on ``PUT /v2/products/:id`` as a full
+        replacement, so files that are not resubmitted are deleted.
+
+    Args:
+        product_id: The Gumroad product ID to update.
+        file_url: Canonical file URL returned by ``complete_file_upload``.
+
+    Returns:
+        The raw Gumroad response payload.
+
+    Raises:
+        RuntimeError: If Gumroad does not report ``success: true``.
+        requests.HTTPError: If the API returns a non-2xx status.
+    """
+    response = put(
+        f"/v2/products/{product_id}",
+        content={"files": [{"url": file_url}]},
+    )
+    response_payload = response.json()
+    if not response_payload.get("success"):
+        raise RuntimeError(
+            f"Failed to attach {file_url} to product {product_id}: "
+            f"{_extract_error_message(response_payload)}"
+        )
+    return response_payload
+
+
+def upload_readme_to_dummy_product() -> dict[str, Any]:
+    """Upload the project README.md to Gumroad and attach it to DUMMY_PRODUCT.
+
+    Returns:
+        The raw Gumroad response payload from the product update.
+
+    Raises:
+        RuntimeError: If Gumroad rejects any step of the upload.
+        requests.HTTPError: If the API returns a non-2xx status.
+        OSError: If README.md cannot be read.
+    """
+    readme_path = Path(__file__).resolve().parents[2] / "README.md"
+    file_summaries = collect_file_sizes([readme_path])
+    presigned_upload = presign_files(file_summaries)[0]
+    uploaded_parts = upload_presigned_file(presigned_upload)
+    completion_payload = complete_file_upload(presigned_upload, uploaded_parts)
+    return attach_file_url_to_product(
+        DUMMY_PRODUCT, completion_payload["file_url"]
+    )
 
 
 def main() -> None:
