@@ -16,11 +16,16 @@ import requests
 from dotenv import load_dotenv
 
 from calc_data.products_dataclass import GumroadProduct
-from calc_data.upload_dataclass import PresignedFileUpload, PresignedUploadPart
+from calc_data.upload_dataclass import (
+    PresignedFileUpload,
+    PresignedUploadPart,
+    UploadedFilePart,
+)
 from calc_data.utilities import CACHE_DIR, FileSummary, _is_cache_valid, _write_debug
 
 GUMROAD_BASE_URL = "https://api.gumroad.com"
 PRESIGN_ENDPOINT_PATH = "/v2/files/presign"
+COMPLETE_ENDPOINT_PATH = "/v2/files/complete"
 CACHE_VERSION = "v1"
 
 
@@ -197,6 +202,15 @@ def get_product(product_id: str) -> tuple[GumroadProduct | None, dict[str, Any]]
     return GumroadProduct(**product_payload), raw_response_data
 
 
+def _extract_error_message(response_payload: dict[str, Any]) -> str:
+    """Return the error message from a failed Gumroad API response."""
+    return str(
+        response_payload.get("message")
+        or response_payload.get("error")
+        or "unknown error"
+    )
+
+
 def presign_file(file_summary: FileSummary) -> PresignedFileUpload:
     """Request presigned multipart upload URLs for a single file.
 
@@ -221,12 +235,10 @@ def presign_file(file_summary: FileSummary) -> PresignedFileUpload:
     )
     response_payload = response.json()
     if not response_payload.get("success"):
-        error_message = (
-            response_payload.get("message")
-            or response_payload.get("error")
-            or "unknown error"
+        raise RuntimeError(
+            f"Failed to presign {source_path}: "
+            f"{_extract_error_message(response_payload)}"
         )
-        raise RuntimeError(f"Failed to presign {source_path}: {error_message}")
 
     return PresignedFileUpload(
         source_path=str(source_path),
@@ -259,6 +271,83 @@ def presign_files(file_summaries: list[FileSummary]) -> list[PresignedFileUpload
         requests.HTTPError: If the API returns a non-2xx status.
     """
     return [presign_file(file_summary) for file_summary in file_summaries]
+
+
+def complete_file_upload(
+    presigned_upload: PresignedFileUpload,
+    uploaded_parts: list[UploadedFilePart],
+) -> dict[str, Any]:
+    """Complete a presigned multipart upload on Gumroad.
+
+    Args:
+        presigned_upload: Presigned upload details from ``presign_file``.
+        uploaded_parts: Uploaded parts with their S3 ``ETag`` headers, as
+            returned by ``upload_presigned_file``.
+
+    Returns:
+        The raw Gumroad response payload, including the canonical file URL.
+
+    Raises:
+        RuntimeError: If Gumroad does not report ``success: true``.
+        requests.HTTPError: If the API returns a non-2xx status.
+    """
+    response = post(
+        COMPLETE_ENDPOINT_PATH,
+        content={
+            "upload_id": presigned_upload.upload_id,
+            "key": presigned_upload.key,
+            "parts": [
+                {
+                    "part_number": uploaded_part.part_number,
+                    "etag": uploaded_part.etag,
+                }
+                for uploaded_part in sorted(
+                    uploaded_parts, key=lambda part: part.part_number
+                )
+            ],
+        },
+    )
+    response_payload = response.json()
+    if not response_payload.get("success"):
+        raise RuntimeError(
+            f"Failed to complete upload for {presigned_upload.source_path}: "
+            f"{_extract_error_message(response_payload)}"
+        )
+    return response_payload
+
+
+def complete_file_uploads(
+    presigned_uploads: list[PresignedFileUpload],
+    uploaded_parts_by_file: list[list[UploadedFilePart]],
+) -> list[dict[str, Any]]:
+    """Complete a list of presigned multipart uploads on Gumroad.
+
+    Args:
+        presigned_uploads: Presigned uploads from ``presign_files``.
+        uploaded_parts_by_file: Uploaded parts per file, in the same order,
+            as returned by ``upload_presigned_files``.
+
+    Returns:
+        The raw Gumroad response payload for each completed upload, in the
+        same order.
+
+    Raises:
+        ValueError: If the number of uploads and part lists differs.
+        RuntimeError: If Gumroad does not report ``success: true``.
+        requests.HTTPError: If the API returns a non-2xx status.
+    """
+    if len(presigned_uploads) != len(uploaded_parts_by_file):
+        raise ValueError(
+            f"Received {len(presigned_uploads)} presigned uploads but "
+            f"{len(uploaded_parts_by_file)} part lists"
+        )
+
+    return [
+        complete_file_upload(presigned_upload, uploaded_parts)
+        for presigned_upload, uploaded_parts in zip(
+            presigned_uploads, uploaded_parts_by_file
+        )
+    ]
 
 
 def main() -> None:
