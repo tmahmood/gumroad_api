@@ -405,8 +405,8 @@ def upload_readme_to_dummy_product() -> dict[str, Any]:
         requests.HTTPError: If the API returns a non-2xx status.
         OSError: If README.md cannot be read.
     """
-    readme_path = Path(__file__).resolve().parents[2] / "README.md"
-    file_summaries = collect_file_sizes([readme_path])
+    resume_path = "/home/mahmood/Dropbox/resume/nipun/Resume - Tarin Mahmood.pdf"
+    file_summaries = collect_file_sizes([resume_path])
     presigned_upload = presign_files(file_summaries)[0]
     uploaded_parts = upload_presigned_file(presigned_upload)
     completion_payload = complete_file_upload(presigned_upload, uploaded_parts)
