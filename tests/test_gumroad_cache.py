@@ -161,6 +161,54 @@ def test_list_products_handles_invalid_json(tmp_path: Path, monkeypatch: pytest.
     assert raw_response_data == {}
 
 
+def test_get_product_returns_parsed_product(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(gumroad, "CACHE_DIR", tmp_path)
+
+    product_payload = {
+        "success": True,
+        "product": {
+            "name": "Sample Product",
+            "id": "prod_123",
+            "price": 1000,
+            "currency": "usd",
+        },
+    }
+
+    mock_response = MagicMock(spec=requests.Response)
+    mock_response.json.return_value = product_payload
+
+    monkeypatch.setattr(gumroad, "gumroad_request", MagicMock(return_value=mock_response))
+
+    product, raw_response_data = gumroad.get_product("prod_123")
+
+    assert product is not None
+    assert product.name == "Sample Product"
+    assert product.id == "prod_123"
+    assert raw_response_data == product_payload
+    assert (tmp_path / "gumroad_v2_products_prod_123_v1.json").exists()
+
+
+def test_get_product_returns_none_when_response_has_no_product(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(gumroad, "CACHE_DIR", tmp_path)
+
+    mock_response = MagicMock(spec=requests.Response)
+    mock_response.json.return_value = {"success": False, "message": "Product not found"}
+
+    monkeypatch.setattr(gumroad, "gumroad_request", MagicMock(return_value=mock_response))
+
+    product, raw_response_data = gumroad.get_product("missing_product")
+
+    assert product is None
+    assert raw_response_data == {"success": False, "message": "Product not found"}
+
+
+def test_get_product_rejects_empty_product_id() -> None:
+    with pytest.raises(ValueError):
+        gumroad.get_product("   ")
+
+
 def test_store_response_returns_cached_response_when_cache_is_valid(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -155,6 +155,46 @@ def list_products() -> tuple[list[GumroadProduct], dict[str, Any]]:
     return products, raw_response_data
 
 
+def get_product(product_id: str) -> tuple[GumroadProduct | None, dict[str, Any]]:
+    """Retrieve a single product by ID from the Gumroad API.
+
+    Args:
+        product_id: The Gumroad product ID, e.g. ``"phRR3J4IO3lBh25O2IV_dQ=="``.
+
+    Returns:
+        A tuple of the parsed ``GumroadProduct`` (or ``None`` when the response
+        does not contain a product) and the raw API response data.
+
+    Raises:
+        ValueError: If ``product_id`` is empty.
+        RuntimeError: If ``GUMROAD_ACCESS_TOKEN`` is not set.
+        requests.HTTPError: If the API returns a non-2xx status.
+    """
+    cleaned_product_id = product_id.strip()
+    if not cleaned_product_id:
+        raise ValueError("product_id must not be empty")
+
+    response = get(f"/v2/products/{cleaned_product_id}")
+    try:
+        raw_response_data = response.json()
+    except json.JSONDecodeError:
+        try:
+            _write_debug(response.text)
+        except OSError:
+            pass
+        return None, {}
+
+    product_payload = (
+        raw_response_data.get("product")
+        if isinstance(raw_response_data, dict)
+        else None
+    )
+    if not isinstance(product_payload, dict):
+        return None, raw_response_data
+
+    return GumroadProduct(**product_payload), raw_response_data
+
+
 def main() -> None:
     """Demo: list products (name + id) using the env-provided access token."""
     load_dotenv()
