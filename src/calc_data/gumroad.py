@@ -9,16 +9,18 @@ from __future__ import annotations
 import functools
 import json
 import os
+from pathlib import Path
 from typing import Any
-
-from calc_data.products_dataclass import GumroadProduct
 
 import requests
 from dotenv import load_dotenv
 
-from calc_data.utilities import _is_cache_valid, _write_debug, CACHE_DIR
+from calc_data.products_dataclass import GumroadProduct
+from calc_data.upload_dataclass import PresignedFileUpload, PresignedUploadPart
+from calc_data.utilities import CACHE_DIR, FileSummary, _is_cache_valid, _write_debug
 
 GUMROAD_BASE_URL = "https://api.gumroad.com"
+PRESIGN_ENDPOINT_PATH = "/v2/files/presign"
 CACHE_VERSION = "v1"
 
 
@@ -195,11 +197,75 @@ def get_product(product_id: str) -> tuple[GumroadProduct | None, dict[str, Any]]
     return GumroadProduct(**product_payload), raw_response_data
 
 
+def presign_file(file_summary: FileSummary) -> PresignedFileUpload:
+    """Request presigned multipart upload URLs for a single file.
+
+    Args:
+        file_summary: Dict containing the local ``filename`` and its
+            ``file_size`` in bytes, as returned by ``collect_file_sizes``.
+
+    Returns:
+        The presigned upload details, including the multipart parts.
+
+    Raises:
+        RuntimeError: If Gumroad reports that presigning failed.
+        requests.HTTPError: If the API returns a non-2xx status.
+    """
+    source_path = Path(file_summary["filename"])
+    response = post(
+        PRESIGN_ENDPOINT_PATH,
+        content={
+            "filename": source_path.name,
+            "file_size": file_summary["file_size"],
+        },
+    )
+    response_payload = response.json()
+    if not response_payload.get("success"):
+        error_message = (
+            response_payload.get("message")
+            or response_payload.get("error")
+            or "unknown error"
+        )
+        raise RuntimeError(f"Failed to presign {source_path}: {error_message}")
+
+    return PresignedFileUpload(
+        source_path=str(source_path),
+        filename=source_path.name,
+        file_size=file_summary["file_size"],
+        upload_id=response_payload["upload_id"],
+        key=response_payload["key"],
+        file_url=response_payload["file_url"],
+        parts=[
+            PresignedUploadPart(
+                part_number=part_payload["part_number"],
+                presigned_url=part_payload["presigned_url"],
+            )
+            for part_payload in response_payload.get("parts", [])
+        ],
+    )
+
+
+def presign_files(file_summaries: list[FileSummary]) -> list[PresignedFileUpload]:
+    """Request presigned multipart upload URLs for a list of files.
+
+    Args:
+        file_summaries: File summaries as returned by ``collect_file_sizes``.
+
+    Returns:
+        One presigned upload per input file, in the same order.
+
+    Raises:
+        RuntimeError: If Gumroad reports that presigning failed for any file.
+        requests.HTTPError: If the API returns a non-2xx status.
+    """
+    return [presign_file(file_summary) for file_summary in file_summaries]
+
+
 def main() -> None:
     """Demo: list products (name + id) using the env-provided access token."""
     load_dotenv()
     try:
-        products, raw_response_data = list_products()
+        products, _raw_response_data = list_products()
         print(f"Fetched {len(products)} product(s) from Gumroad")
         for product in products:
             print(f"- {product.name} ({product.id})")

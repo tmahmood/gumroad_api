@@ -1,5 +1,6 @@
 import time
 from pathlib import Path
+from typing import TypedDict
 
 CACHE_DIR = Path("cache")
 CACHE_TTL = 3600  # 1 hour in seconds
@@ -7,6 +8,13 @@ CACHE_VERSION = "v1"
 
 BYTES_PER_GIGABYTE = 1024**3
 MAXIMUM_FILE_SIZE_BYTES = 20 * BYTES_PER_GIGABYTE
+
+
+class FileSummary(TypedDict):
+    """Name and size in bytes of a single file."""
+
+    filename: str
+    file_size: int
 
 
 def _cache_path() -> Path:
@@ -38,7 +46,7 @@ def _write_debug(raw_content: str) -> None:
         pass
 
 
-def collect_file_sizes(file_paths: list[str | Path]) -> list[dict[str, str | int]]:
+def collect_file_sizes(file_paths: list[str | Path]) -> list[FileSummary]:
     """Summarize files by name and size in bytes.
 
     Args:
@@ -54,7 +62,7 @@ def collect_file_sizes(file_paths: list[str | Path]) -> list[dict[str, str | int
             or larger.
         OSError: If a file's metadata cannot be read.
     """
-    file_summaries: list[dict[str, str | int]] = []
+    file_summaries: list[FileSummary] = []
     for file_path_value in file_paths:
         file_path = Path(file_path_value)
         if not file_path.exists():
