@@ -22,6 +22,21 @@ class PresignedUploadPart:
 
 
 @dataclass
+class UploadedFilePart:
+    """An S3 multipart part that has been uploaded successfully."""
+
+    part_number: int
+    etag: str
+
+    def to_dict(self) -> dict[str, int | str]:
+        """Convert the uploaded part to a JSON-serializable dict."""
+        return {
+            "part_number": self.part_number,
+            "etag": self.etag,
+        }
+
+
+@dataclass
 class PresignedFileUpload:
     """Presigned upload details for one file.
 
