@@ -485,7 +485,7 @@ def test_extract_s3_upload_url_from_presign_response() -> None:
     direct_url_payload = {"success": True, "url": "https://s3.amazonaws.com/bucket/file1"}
     assert (
         gumroad.extract_s3_upload_url_from_presign_response(direct_url_payload)
-        == "https://s3.amazonaws.com/bucket/file1"
+        == ["https://s3.amazonaws.com/bucket/file1"]
     )
 
     nested_url_payload = {
@@ -494,7 +494,7 @@ def test_extract_s3_upload_url_from_presign_response() -> None:
     }
     assert (
         gumroad.extract_s3_upload_url_from_presign_response(nested_url_payload)
-        == "https://s3.amazonaws.com/bucket/file2"
+        == ["https://s3.amazonaws.com/bucket/file2"]
     )
 
     mock_response = MagicMock(spec=requests.Response)
@@ -503,7 +503,7 @@ def test_extract_s3_upload_url_from_presign_response() -> None:
     }
     assert (
         gumroad.extract_s3_upload_url_from_presign_response(mock_response)
-        == "https://s3.amazonaws.com/bucket/file3"
+        == ["https://s3.amazonaws.com/bucket/file3"]
     )
 
     parts_payload = {
@@ -512,8 +512,32 @@ def test_extract_s3_upload_url_from_presign_response() -> None:
     }
     assert (
         gumroad.extract_s3_upload_url_from_presign_response(parts_payload)
-        == "https://s3.amazonaws.com/bucket/file_parts"
+        == ["https://s3.amazonaws.com/bucket/file_parts"]
     )
+
+
+def test_extract_s3_upload_url_from_presign_response_multipart_schema() -> None:
+    presigned_payload = {
+        "success": True,
+        "upload_id": "ibZBv_75gd9o.uPYmGbJ5JjxqK4_VsP3...",
+        "key": "attachments/A-m3CDDC5dlrSdKZp0RFhA==/9f2c1b7d6e4a/original/course.pdf",
+        "file_url": "https://gumroad-specials.s3.amazonaws.com/attachments/A-m3CDDC5dlrSdKZp0RFhA==/9f2c1b7d6e4a/original/course.pdf",
+        "parts": [
+            {
+                "part_number": 1,
+                "presigned_url": "https://gumroad-specials.s3.amazonaws.com/...&partNumber=1&uploadId=...",
+            },
+            {
+                "part_number": 2,
+                "presigned_url": "https://gumroad-specials.s3.amazonaws.com/...&partNumber=2&uploadId=...",
+            },
+        ],
+    }
+    extracted_urls = gumroad.extract_s3_upload_url_from_presign_response(presigned_payload)
+    assert extracted_urls == [
+        "https://gumroad-specials.s3.amazonaws.com/...&partNumber=1&uploadId=...",
+        "https://gumroad-specials.s3.amazonaws.com/...&partNumber=2&uploadId=...",
+    ]
 
 
 def test_extract_s3_upload_url_raises_value_error_when_missing() -> None:

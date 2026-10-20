@@ -23,6 +23,7 @@ GUMROAD_BASE_URL = "https://api.gumroad.com"
 CACHE_VERSION = "v1"
 DUMMY_PRODUCT = "ZiQxH2j2thl6z0P3qti1HQ=="
 MAX_PRESIGNED_FILE_SIZE_BYTES = 20 * 1024 * 1024 * 1024  # 20 GB in bytes
+PRESIGNED_UPLOAD_PART_SIZE_BYTES = 100 * 1024 * 1024  # 100 MB in bytes
 
 
 def _get_access_token() -> str:
@@ -329,14 +330,14 @@ def request_presigned_file_upload_url(
 
 def extract_s3_upload_url_from_presign_response(
     presigned_response_payload: dict[str, Any] | requests.Response,
-) -> str:
-    """Extract the S3 upload URL from a presign API response or dictionary.
+) -> list[str]:
+    """Extract the S3 upload URLs from a presign API response or dictionary.
 
     Args:
         presigned_response_payload: Response object or dictionary from presign request.
 
     Returns:
-        The S3 URL string for uploading the file.
+        List of S3 presigned URL strings for uploading the file parts.
 
     Raises:
         ValueError: If no valid S3 upload URL is found in the response.
@@ -347,30 +348,37 @@ def extract_s3_upload_url_from_presign_response(
         presigned_data_dictionary = presigned_response_payload
 
     if isinstance(presigned_data_dictionary, dict):
-        for possible_key in ("url", "presigned_url", "s3_url", "upload_url", "file_url"):
-            if possible_key in presigned_data_dictionary and presigned_data_dictionary[possible_key]:
-                return str(presigned_data_dictionary[possible_key])
-        if "data" in presigned_data_dictionary and isinstance(presigned_data_dictionary["data"], dict):
-            nested_data_dictionary = presigned_data_dictionary["data"]
-            for possible_key in ("url", "presigned_url", "s3_url", "upload_url", "file_url"):
-                if possible_key in nested_data_dictionary and nested_data_dictionary[possible_key]:
-                    return str(nested_data_dictionary[possible_key])
         raw_parts_data = presigned_data_dictionary.get("parts")
         if raw_parts_data is None and isinstance(presigned_data_dictionary.get("data"), dict):
             raw_parts_data = presigned_data_dictionary["data"].get("parts")
+
         if isinstance(raw_parts_data, list) and len(raw_parts_data) > 0:
-            first_part_entry = raw_parts_data[0]
-            if isinstance(first_part_entry, str):
-                return first_part_entry
-            if isinstance(first_part_entry, dict):
-                part_url = (
-                    first_part_entry.get("presigned_url")
-                    or first_part_entry.get("url")
-                    or first_part_entry.get("s3_url")
-                    or first_part_entry.get("upload_url")
-                )
-                if part_url:
-                    return str(part_url)
+            extracted_presigned_urls_list: list[str] = []
+            for part_item in raw_parts_data:
+                if isinstance(part_item, str) and part_item:
+                    extracted_presigned_urls_list.append(part_item)
+                elif isinstance(part_item, dict):
+                    part_upload_url = (
+                        part_item.get("presigned_url")
+                        or part_item.get("url")
+                        or part_item.get("s3_url")
+                        or part_item.get("upload_url")
+                    )
+                    if part_upload_url:
+                        extracted_presigned_urls_list.append(str(part_upload_url))
+            if extracted_presigned_urls_list:
+                return extracted_presigned_urls_list
+
+        for possible_key in ("url", "presigned_url", "s3_url", "upload_url"):
+            if possible_key in presigned_data_dictionary and presigned_data_dictionary[possible_key]:
+                return [str(presigned_data_dictionary[possible_key])]
+
+        if "data" in presigned_data_dictionary and isinstance(presigned_data_dictionary["data"], dict):
+            nested_data_dictionary = presigned_data_dictionary["data"]
+            for possible_key in ("url", "presigned_url", "s3_url", "upload_url"):
+                if possible_key in nested_data_dictionary and nested_data_dictionary[possible_key]:
+                    return [str(nested_data_dictionary[possible_key])]
+
     raise ValueError("Could not extract S3 upload URL from presign response")
 
 
@@ -412,7 +420,6 @@ def extract_presigned_parts_from_presign_response(
                         or part_item.get("url")
                         or part_item.get("s3_url")
                         or part_item.get("upload_url")
-                        or part_item.get("file_url")
                     )
                     if part_url:
                         part_dict: dict[str, Any] = {
@@ -427,8 +434,11 @@ def extract_presigned_parts_from_presign_response(
         return extracted_parts_list
 
     try:
-        single_upload_url = extract_s3_upload_url_from_presign_response(presigned_data_dictionary)
-        return [{"part_number": 1, "presigned_url": single_upload_url}]
+        single_upload_urls_list = extract_s3_upload_url_from_presign_response(presigned_data_dictionary)
+        return [
+            {"part_number": part_index + 1, "presigned_url": single_part_url}
+            for part_index, single_part_url in enumerate(single_upload_urls_list)
+        ]
     except ValueError:
         pass
 
@@ -672,8 +682,9 @@ def upload_product_files_via_presign(
             timeout=timeout,
         )
         try:
-            s3_upload_url = extract_s3_upload_url_from_presign_response(presigned_response)
-        except ValueError:
+            s3_upload_urls_list = extract_s3_upload_url_from_presign_response(presigned_response)
+            s3_upload_url = s3_upload_urls_list[0]
+        except (ValueError, IndexError):
             s3_upload_url = presigned_parts_list[0]["presigned_url"]
         uploaded_file_urls_list.append(s3_upload_url)
 
